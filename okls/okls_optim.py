@@ -22,7 +22,7 @@ Usage:
 import torch
 from torch.optim import Optimizer
 
-from okls_step import okls_step
+from .okls_step import okls_step
 
 
 class OnlineKLShampoo(Optimizer):

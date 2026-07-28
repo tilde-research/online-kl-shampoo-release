@@ -16,7 +16,7 @@ import math
 import torch
 from torch import Tensor
 
-from scaled_cans_coupled_ns import scaled_cans_coupled_ns
+from .scaled_cans_coupled_ns import scaled_cans_coupled_ns
 
 
 def init_preconditioners(
