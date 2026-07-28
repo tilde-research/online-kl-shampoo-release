@@ -16,13 +16,13 @@ The implementation combines:
   FP16 GEMMs with FP32 accumulation.
 - **Zero-staleness updates**: covariance factors and their inverse roots are
   produced and consumed in the same step.
-- **muP shape scaling**, Nesterov momentum with variance correction, and AdamC
+- **muP shape scaling**, **Nesterov momentum** with variance correction, and **AdamC**
   decoupled weight decay.
 
 In our scaling experiments, OKLS achieves **1.45× Muon's parameter efficiency**
 while maintaining roughly **98% of its training throughput**.
 
-See the blog for the derivation, systems design, and experiments:
+See the blog for the derivation, system design, and experiments:
 https://blog.tilderesearch.com/blog/online-kl-shampoo
 
 ## How it works
