@@ -27,45 +27,45 @@ For a matrix parameter with gradient $G_t \in \mathbb{R}^{m \times n}$, OKLS
 maintains left and right covariance factors $S_{a,t}$ and $S_{b,t}$. Using the
 previous preconditioners $P_{a,t-1}$ and $P_{b,t-1}$, it updates
 
-$$
+```math
 S_{a,t}
 =
 \beta_2 S_{a,t-1}
 +
 \frac{1-\beta_2}{n}
 (G_t P_{b,t-1})(G_t P_{b,t-1})^\top,
-$$
+```
 
-$$
+```math
 S_{b,t}
 =
 \beta_2 S_{b,t-1}
 +
 \frac{1-\beta_2}{m}
 (P_{a,t-1}G_t)^\top(P_{a,t-1}G_t).
-$$
+```
 
 Fresh inverse roots are then computed immediately:
 
-$$
+```math
 P_{a,t} = S_{a,t}^{-1/2},
 \qquad
 P_{b,t} = S_{b,t}^{-1/2}.
-$$
+```
 
 The Nesterov momentum $N_t$ is whitened from both sides,
 
-$$
+```math
 U_t = P_{a,t} N_t P_{b,t},
-$$
+```
 
 and scaled using the matrix-shape-dependent muP multiplier
 
-$$
+```math
 c_{\mathrm{shape}}
 =
 \frac{\sqrt{m/n}}{\sqrt{m}+\sqrt{n}}.
-$$
+```
 
 The inverse roots are evaluated with Scaled CANS Coupled Newton–Schulz. The
 iteration uses Chebyshev-optimized coefficients and deterministic per-step
