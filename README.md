@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="400" alt="Tilde Research">
+</p>
+
 # Online KL Shampoo
 
 Online KL Shampoo (OKLS) is a zero-staleness, Kronecker-factored optimizer that
