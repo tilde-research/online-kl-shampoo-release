@@ -47,9 +47,9 @@ class OnlineKLShampoo(Optimizer):
     Args:
         params: Iterable of 2D or 3D parameters to optimize.
         lr: Learning rate (also used as lr_peak for AdamC).
-        beta1: Momentum EMA coefficient (default: 0.95).
-        beta2: Preconditioner EMA coefficient (default: 0.95).
-        eps: Epsilon for numerical stability (default: 1e-12).
+        beta1: Momentum EMA coefficient (default: 0.9684).
+        beta2: Preconditioner EMA coefficient (default: 0.9482).
+        eps: Epsilon for numerical stability (default: 1e-9).
         weight_decay: Decoupled weight decay coefficient (default: 0.0).
 
     Note:
@@ -63,9 +63,9 @@ class OnlineKLShampoo(Optimizer):
         params,
         *,
         lr: float,
-        beta1: float = 0.95,
-        beta2: float = 0.95,
-        eps: float = 1e-12,
+        beta1: float = 0.9684,
+        beta2: float = 0.9482,
+        eps: float = 1e-9,
         weight_decay: float = 0.0,
     ):
         if lr < 0.0:

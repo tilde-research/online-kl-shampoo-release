@@ -116,11 +116,11 @@ other_params = [p for p in model.parameters() if id(p) not in okls_param_ids]
 
 okls = OnlineKLShampoo(
     okls_params,
-    lr=0.01,
-    beta1=0.95,
-    beta2=0.95,
-    eps=1e-12,
-    weight_decay=0.0,
+    lr=0.09434,
+    beta1=0.9684,
+    beta2=0.9482,
+    eps=1e-9,
+    weight_decay=0.0303,
 )
 adamw = torch.optim.AdamW(other_params, lr=3e-4)
 
@@ -135,13 +135,29 @@ for input_ids, labels in dataloader:
     adamw.zero_grad()
 ```
 
-When using a learning-rate scheduler, construct it normally from `okls`:
+### Learning-rate schedule
+
+We use linear warmup followed by a constant phase, then linear decay in the
+last `decay_ratio` fraction of training:
 
 ```python
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    okls,
-    T_max=total_steps,
-)
+total_steps = ...   # total training steps
+warmup_steps = 250
+decay_ratio = 0.7319   # decay begins at step (1 - 0.7319) * total_steps
+min_lr_factor = 0.0    # final lr = min_lr_factor * peak lr
+
+def lr_lambda(step):
+    # Warmup: linear ramp from ~0 to 1
+    if warmup_steps > 0 and step < warmup_steps:
+        return (1 + step) / warmup_steps
+    # Decay: linear ramp from 1 to min_lr_factor in last decay_ratio fraction
+    progress = step / total_steps if total_steps > 0 else 1.0
+    if progress > 1.0 - decay_ratio:
+        decay_progress = (progress - (1.0 - decay_ratio)) / decay_ratio
+        return 1.0 - decay_progress * (1.0 - min_lr_factor)
+    return 1.0
+
+scheduler = torch.optim.lr_scheduler.LambdaLR(okls, lr_lambda)
 
 # After okls.step():
 scheduler.step()
@@ -166,9 +182,9 @@ while all matrices share the optimizer hyperparameters.
 | Argument | Default | Description |
 | --- | ---: | --- |
 | `lr` | required | Current learning rate and fixed initial `lr_peak` used by AdamC. |
-| `beta1` | `0.95` | Nesterov momentum EMA coefficient. |
-| `beta2` | `0.95` | Kronecker-factor EMA coefficient. |
-| `eps` | `1e-12` | Stability term added during factor initialization and updates. |
+| `beta1` | `0.9684` | Nesterov momentum EMA coefficient. |
+| `beta2` | `0.9482` | Kronecker-factor EMA coefficient. |
+| `eps` | `1e-9` | Stability term added during factor initialization and updates. |
 | `weight_decay` | `0.0` | Decoupled AdamC weight-decay coefficient. |
 
 The implementation stores momentum, covariance factors, and preconditioners in
