@@ -181,16 +181,56 @@ while all matrices share the optimizer hyperparameters.
 
 | Argument | Default | Description |
 | --- | ---: | --- |
-| `lr` | required | Current learning rate and fixed initial `lr_peak` used by AdamC. |
+| `lr` | `0.09434` | Current learning rate and fixed initial `lr_peak` used by AdamC. |
 | `beta1` | `0.9684` | Nesterov momentum EMA coefficient. |
 | `beta2` | `0.9482` | Kronecker-factor EMA coefficient. |
 | `eps` | `1e-9` | Stability term added during factor initialization and updates. |
-| `weight_decay` | `0.0` | Decoupled AdamC weight-decay coefficient. |
+| `weight_decay` | `0.0303` | Decoupled AdamC weight-decay coefficient. |
 
 The implementation stores momentum, covariance factors, and preconditioners in
 FP32. For a matrix of shape `(m, n)`, the persistent state contains one
 `(m, n)` momentum matrix and two copies each of the `(m, m)` and `(n, n)`
 factor shapes.
+
+## Weight initialization
+
+We use **Spectral muP Gaussian Initialization**, which samples i.i.d. Gaussian
+weights calibrated so the operator norm (spectral norm) of each matrix is a
+controlled constant at init. This is consistent with the muP shape scaling used
+in the optimizer update.
+
+Given a weight matrix $W \in \mathbb{R}^{n_\text{out} \times n_\text{in}}$ and
+a target operator norm $\sigma^*$ (`init_operator_norm`):
+
+1. Compute the RMS-to-RMS scale:
+
+```math
+s = \sigma^* \sqrt{n_\text{out} / n_\text{in}}
+```
+
+2. Sample from a Gaussian at the Marchenko–Pastur edge:
+
+```math
+W \sim \mathcal{N}\!\left(0,\;\left(\frac{s}{\sqrt{n_\text{in}} + \sqrt{n_\text{out}}}\right)^{\!2}\right)
+```
+
+The denominator $\sqrt{n_\text{in}} + \sqrt{n_\text{out}}$ is the
+Marchenko–Pastur edge for an i.i.d. Gaussian matrix scaled to unit variance per
+entry, ensuring the spectral norm concentrates around $s$.
+
+Our sweep found the optimal value to be `init_operator_norm = 0.07539`.
+
+```python
+import torch
+import math
+
+def spectral_mup_gaussian_init(weight: torch.Tensor, init_operator_norm: float = 0.07539):
+    """Spectral muP Gaussian initialization for a 2D weight matrix."""
+    n_out, n_in = weight.shape
+    s = init_operator_norm * math.sqrt(n_out / n_in)
+    std = s / (math.sqrt(n_in) + math.sqrt(n_out))
+    weight.data.normal_(0, std)
+```
 
 ## Code structure
 

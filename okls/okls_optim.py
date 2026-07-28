@@ -9,7 +9,7 @@ Usage:
     # Matrix parameters only (2D or 3D).  Use a separate optimizer for
     # embeddings, heads, norms, biases, etc.
     matrix_params = [p for p in model.parameters() if p.ndim in (2, 3)]
-    optimizer = OnlineKLShampoo(matrix_params, lr=0.01)
+    optimizer = OnlineKLShampoo(matrix_params, lr=0.09434)
 
     for step in range(total_steps):
         loss = model(x).sum()
@@ -50,7 +50,7 @@ class OnlineKLShampoo(Optimizer):
         beta1: Momentum EMA coefficient (default: 0.9684).
         beta2: Preconditioner EMA coefficient (default: 0.9482).
         eps: Epsilon for numerical stability (default: 1e-9).
-        weight_decay: Decoupled weight decay coefficient (default: 0.0).
+        weight_decay: Decoupled weight decay coefficient (default: 0.0303).
 
     Note:
         When using an LR scheduler, lr_peak is automatically set to the
@@ -62,11 +62,11 @@ class OnlineKLShampoo(Optimizer):
         self,
         params,
         *,
-        lr: float,
+        lr: float = 0.09434,
         beta1: float = 0.9684,
         beta2: float = 0.9482,
         eps: float = 1e-9,
-        weight_decay: float = 0.0,
+        weight_decay: float = 0.0303,
     ):
         if lr < 0.0:
             raise ValueError(f"Invalid learning rate: {lr}")
