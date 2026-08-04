@@ -61,16 +61,31 @@ def _estimate_max_eigenvalue(A: torch.Tensor) -> torch.Tensor:
     """Strict upper bound via min(Wolkowicz-Styan, Minc-Sainte-Marie). Cost: O(n²)."""
     n = A.size(-1)
     diag = A.diagonal(dim1=-2, dim2=-1)
-    m = diag.sum(dim=-1) / n
-    sq_norm = torch.sum(A**2, dim=(-2, -1))
-    s_sq = torch.clamp((sq_norm / n) - (m**2), min=0.0)
-    ws_bound = m + torch.sqrt(s_sq) * math.sqrt(n - 1)
 
-    abs_A = torch.abs(A)
-    d = torch.sum(abs_A, dim=-1)
-    d_clamped = torch.clamp(d, min=1e-12)
-    y = torch.einsum("...ij,...j->...i", abs_A, d_clamped)
-    minc_bound = torch.max(y / d_clamped, dim=-1).values
+    # ── Optimal scaling: max(|A/c|) = √FP32_MAX / n ──
+    # Both bounds involve O(n²·max²) intermediates.  Scaling by
+    # c = max(|diag|)·n/√FP32_MAX keeps every intermediate in FP32 range
+    # while maximising dynamic-range usage (fewest small elements lost).
+    # For SPD matrices max(|A_ij|) ≤ max(diag_i), so this is a safe bound.
+    _FROB_SCALE = n / math.sqrt(torch.finfo(torch.float32).max)   # n / 1.844e19
+    c = (diag.abs().max(dim=-1).values * _FROB_SCALE).clamp(min=1e-30)
+    c_inv = 1.0 / c
+
+    # Single n² materialisation: |A/c|  (||x||_F = |||x|||_F, so both bounds
+    # can work from the elementwise-abs form without loss of information.)
+    abs_A_s = (A * c_inv[..., None, None]).abs()
+
+    # ── Wolkowicz-Styan bound on A/c, then unscale ──
+    m_s = diag.sum(dim=-1) * (c_inv / n)
+    f_s_n = torch.linalg.matrix_norm(abs_A_s) * (1.0 / math.sqrt(n))
+    s_s = torch.sqrt(torch.clamp((f_s_n + m_s) * (f_s_n - m_s), min=0.0))
+    ws_bound = c * (m_s + s_s * math.sqrt(n - 1))
+
+    # ── Minc-Sainte-Marie bound on A/c, then unscale ──
+    d_s = torch.sum(abs_A_s, dim=-1)
+    d_s_clamped = torch.clamp(d_s, min=1e-12)
+    y_s = torch.einsum("...ij,...j->...i", abs_A_s, d_s_clamped)
+    minc_bound = c * torch.max(y_s / d_s_clamped, dim=-1).values
 
     return torch.minimum(ws_bound, minc_bound)
 
