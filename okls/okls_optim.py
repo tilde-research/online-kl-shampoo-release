@@ -3,7 +3,8 @@ Online KL-Shampoo: torch.optim.Optimizer wrapper.
 
 Supports both 2D (m, n) and 3D (N, m, n) parameters.  3D params are
 treated as N independent (m, n) matrices that share hyperparameters
-but maintain separate preconditioners
+but maintain separate preconditioners. Symmetric optimizer state is
+stored as packed upper triangles to reduce persistent state memory.
 
 Usage:
     # Matrix parameters only (2D or 3D).  Use a separate optimizer for
@@ -40,6 +41,8 @@ class OnlineKLShampoo(Optimizer):
       - 2D parameters (m, n): single matrix with (m, m) and (n, n) preconditioners.
       - 3D parameters (N, m, n): N independent matrices sharing hyperparameters.
         but with separate per-matrix preconditioners.
+      - Packed upper-triangular storage for all symmetric covariance and
+        inverse-root state.
 
     Non-matrix parameters (embeddings, biases, norms) should use a separate
     optimizer (e.g. AdamW).
@@ -79,14 +82,14 @@ class OnlineKLShampoo(Optimizer):
         if weight_decay < 0.0:
             raise ValueError(f"Invalid weight_decay: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            lr_peak=lr,  # fixed for AdamC; not modified by LR schedulers
-            beta1=beta1,
-            beta2=beta2,
-            eps=eps,
-            weight_decay=weight_decay,
-        )
+        defaults = {
+            "lr": lr,
+            "lr_peak": lr,  # fixed for AdamC; not modified by LR schedulers
+            "beta1": beta1,
+            "beta2": beta2,
+            "eps": eps,
+            "weight_decay": weight_decay,
+        }
         super().__init__(params, defaults)
 
         # Validate all params are 2D or 3D
@@ -132,11 +135,21 @@ class OnlineKLShampoo(Optimizer):
                         batch, m, n = p.shape
 
                     state["step"] = 0
-                    state["momentum"] = torch.zeros(batch, m, n, dtype=torch.float32, device=p.device)
-                    state["S_a"] = torch.zeros(batch, m, m, dtype=torch.float32, device=p.device)
-                    state["S_b"] = torch.zeros(batch, n, n, dtype=torch.float32, device=p.device)
-                    state["P_a"] = torch.zeros(batch, m, m, dtype=torch.float32, device=p.device)
-                    state["P_b"] = torch.zeros(batch, n, n, dtype=torch.float32, device=p.device)
+                    state["momentum"] = torch.zeros(
+                        batch, m, n, dtype=torch.float32, device=p.device
+                    )
+                    state["S_a"] = torch.zeros(
+                        batch, m * (m + 1) // 2, dtype=torch.float32, device=p.device
+                    )
+                    state["S_b"] = torch.zeros(
+                        batch, n * (n + 1) // 2, dtype=torch.float32, device=p.device
+                    )
+                    state["P_a"] = torch.zeros(
+                        batch, m * (m + 1) // 2, dtype=torch.float32, device=p.device
+                    )
+                    state["P_b"] = torch.zeros(
+                        batch, n * (n + 1) // 2, dtype=torch.float32, device=p.device
+                    )
 
                 # Cast to fp32 and ensure 3D
                 grad_fp32 = grad.float()

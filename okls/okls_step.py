@@ -7,16 +7,36 @@ Hardcoded choices:
   - muP shape scaling
   - Nesterov momentum with variance correction
 
-All functions expect batched 3D tensors: (N, m, n) for params/grads,
-(N, m, m) for S_a/P_a, (N, n, n) for S_b/P_b.  The optimizer wrapper
-handles unsqueezing 2D parameters to (1, m, n).
+Parameters, gradients, and momentum use batched 3D tensors (N, m, n).
+Optimizer covariance and inverse-root state uses packed upper triangles:
+(N, m*(m+1)//2) for S_a/P_a and (N, n*(n+1)//2) for S_b/P_b.
+Full symmetric matrices are reconstructed transiently during each step.
 """
 
 import math
+
 import torch
 from torch import Tensor
 
 from .scaled_cans_coupled_ns import scaled_cans_coupled_ns
+
+
+def _pack_sym(matrix: Tensor) -> Tensor:
+    """Pack symmetric ``(*, d, d)`` tensors as upper triangles."""
+    d = matrix.shape[-1]
+    rows, cols = torch.triu_indices(d, d, device=matrix.device)
+    return matrix[..., rows, cols]
+
+
+def _unpack_sym(packed: Tensor, d: int) -> Tensor:
+    """Reconstruct symmetric ``(*, d, d)`` tensors from upper triangles."""
+    matrix = torch.empty(
+        packed.shape[:-1] + (d, d), dtype=packed.dtype, device=packed.device
+    )
+    rows, cols = torch.triu_indices(d, d, device=packed.device)
+    matrix[..., rows, cols] = packed
+    matrix[..., cols, rows] = packed
+    return matrix
 
 
 def init_preconditioners(
@@ -38,23 +58,23 @@ def init_preconditioners(
         eps:   stability constant.
     """
     N, m, n = grad.shape
-    frob_sq = grad.square().sum(dim=(-2, -1))                        # (N,)
+    frob_sq = grad.square().sum(dim=(-2, -1))  # (N,)
 
     # ── S_a = sqrt(m / (n · ||G||²)) · GGᵀ  +  (||S_a||_F/√m + ε)I ──
-    GGt = torch.bmm(grad, grad.mT)                                   # (N, m, m)
+    GGt = torch.bmm(grad, grad.mT)  # (N, m, m)
     scale_a = torch.sqrt(m / (n * frob_sq + eps)).view(N, 1, 1)
     S_a.copy_(scale_a * GGt)
     S_a.copy_(0.5 * (S_a + S_a.mT))
-    frob_Sa = S_a.square().sum(dim=(-2, -1)).sqrt()                   # (N,)
-    k_a = frob_Sa / math.sqrt(m)                                     # (N,)
+    frob_Sa = S_a.square().sum(dim=(-2, -1)).sqrt()  # (N,)
+    k_a = frob_Sa / math.sqrt(m)  # (N,)
     S_a.diagonal(dim1=-2, dim2=-1).add_(k_a.unsqueeze(-1) + eps)
 
     # ── S_b = sqrt(n / (m · ||G||²)) · GᵀG  +  (||S_b||_F/√n + ε)I ──
-    GtG = torch.bmm(grad.mT, grad)                                   # (N, n, n)
+    GtG = torch.bmm(grad.mT, grad)  # (N, n, n)
     scale_b = torch.sqrt(n / (m * frob_sq + eps)).view(N, 1, 1)
     S_b.copy_(scale_b * GtG)
     S_b.copy_(0.5 * (S_b + S_b.mT))
-    frob_Sb = S_b.square().sum(dim=(-2, -1)).sqrt()                   # (N,)
+    frob_Sb = S_b.square().sum(dim=(-2, -1)).sqrt()  # (N,)
     k_b = frob_Sb / math.sqrt(n)
     S_b.diagonal(dim1=-2, dim2=-1).add_(k_b.unsqueeze(-1) + eps)
 
@@ -85,10 +105,10 @@ def okls_step(
         param:        (N, m, n)  current parameter, fp32.
         grad:         (N, m, n)  gradient, fp32.
         momentum:     (N, m, n)  EMA momentum buffer (mutated in-place).
-        S_a:          (N, m, m)  left covariance factor (mutated in-place).
-        S_b:          (N, n, n)  right covariance factor (mutated in-place).
-        P_a:          (N, m, m)  left preconditioner (mutated in-place).
-        P_b:          (N, n, n)  right preconditioner (mutated in-place).
+        S_a:          (N, m*(m+1)//2) packed left covariance state.
+        S_b:          (N, n*(n+1)//2) packed right covariance state.
+        P_a:          (N, m*(m+1)//2) packed left preconditioner state.
+        P_b:          (N, n*(n+1)//2) packed right preconditioner state.
         step:         current step index (0-based).
         beta1:        momentum EMA coefficient.
         beta2:        preconditioner EMA coefficient.
@@ -101,6 +121,12 @@ def okls_step(
         New parameter tensor (N, m, n), fp32.
     """
     _, m, n = grad.shape
+    packed_S_a, packed_S_b = S_a, S_b
+    packed_P_a, packed_P_b = P_a, P_b
+    S_a = _unpack_sym(packed_S_a, m)
+    S_b = _unpack_sym(packed_S_b, n)
+    P_a = _unpack_sym(packed_P_a, m)
+    P_b = _unpack_sym(packed_P_b, n)
 
     # ── Warm start at step 0 ──
     if step == 0:
@@ -111,8 +137,8 @@ def okls_step(
     N_t = torch.lerp(grad, momentum, beta1)
 
     # ── 2. Preconditioner EMA ──
-    GPb = torch.bmm(grad, P_b)                                      # (N, m, n)
-    PaG = torch.bmm(P_a, grad)                                      # (N, m, n)
+    GPb = torch.bmm(grad, P_b)  # (N, m, n)
+    PaG = torch.bmm(P_a, grad)  # (N, m, n)
 
     S_a.baddbmm_(GPb, GPb.mT, beta=beta2, alpha=(1 - beta2) / n)
     S_a.copy_(0.5 * (S_a + S_a.mT))
@@ -132,9 +158,14 @@ def okls_step(
     # ── 5. Decoupled Weight Decay (AdamC) and Update ──
     v_nesterov = ((1 - beta1) / (1 + beta1)) * (1 + 2 * beta1 - 2 * beta1**3)
     c_momentum = v_nesterov**-0.5
-    s_shape = (m / n) ** 0.5 / (m**0.5 + n**0.5)                     # muP
+    s_shape = (m / n) ** 0.5 / (m**0.5 + n**0.5)  # muP
 
-    wd_coeff = weight_decay * lr * (lr / lr_peak)                     # AdamC
+    wd_coeff = weight_decay * lr * (lr / lr_peak)  # AdamC
     new_param = param * (1 - wd_coeff) - lr * c_momentum * s_shape * U
+
+    packed_S_a.copy_(_pack_sym(S_a))
+    packed_S_b.copy_(_pack_sym(S_b))
+    packed_P_a.copy_(_pack_sym(P_a))
+    packed_P_b.copy_(_pack_sym(P_b))
 
     return new_param

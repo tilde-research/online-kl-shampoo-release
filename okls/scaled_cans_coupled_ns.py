@@ -2,9 +2,9 @@
 Pure-torch 10-step coupled Newton-Schulz  S^{-1/2}  via CANS polynomials.
 """
 
-import torch
 import math
 
+import torch
 
 # ──────────── CANS polynomial coefficients (arXiv:2506.10935) ────────────
 CANS_COEFFS = [
@@ -23,8 +23,17 @@ CANS_COEFFS = [
 # ──────────────── Per-step safe-scale ceilings (eigs in [0, 1]) ─────────────
 _M = 16384.0
 _Z_MAX = [
-    1.0, 5.183, 13.403, 34.409, 86.731, 209.09,
-    457.55, 850.85, 1352.0, 2035.0, 3052.5,
+    1.0,
+    5.183,
+    13.403,
+    34.409,
+    86.731,
+    209.09,
+    457.55,
+    850.85,
+    1352.0,
+    2035.0,
+    3052.5,
 ]
 _Y_MAX = [1.0, 1.297, 1.726, 1.473, 1.545, 1.415, 1.273, 1.148, 1.0, 1.0, 1.0]
 _P_MAX = [1.0, 3.98, 3.95, 3.88, 3.71, 3.32, 2.60, 1.73, 1.15, 1.008, 1.0]
@@ -67,7 +76,7 @@ def _estimate_max_eigenvalue(A: torch.Tensor) -> torch.Tensor:
     # c = max(|diag|)·n/√FP32_MAX keeps every intermediate in FP32 range
     # while maximising dynamic-range usage (fewest small elements lost).
     # For SPD matrices max(|A_ij|) ≤ max(diag_i), so this is a safe bound.
-    _FROB_SCALE = n / math.sqrt(torch.finfo(torch.float32).max)   # n / 1.844e19
+    _FROB_SCALE = n / math.sqrt(torch.finfo(torch.float32).max)  # n / 1.844e19
     c = (diag.abs().max(dim=-1).values * _FROB_SCALE).clamp(min=1e-30)
     c_inv = 1.0 / c
 
@@ -104,7 +113,7 @@ def scaled_cans_coupled_ns(
     Returns:
         W: (B, d, d) approximate S^{-1/2} in S.dtype.
     """
-    B, d, _ = S.shape
+    B, _, _ = S.shape
     orig_dtype = S.dtype
     S = S.float()
 
@@ -116,7 +125,9 @@ def scaled_cans_coupled_ns(
     Z = Y.mul(_Z_SCALE_0)
     Z.diagonal(dim1=-2, dim2=-1).add_(_Z_DIAG_ADD_0)
     Y_half = Y.half()
-    Y = torch.baddbmm(Y, Y_half, Y_half, torch.float32, beta=_BETA_Y_0, alpha=_ALPHA_Y_0)
+    Y = torch.baddbmm(
+        Y, Y_half, Y_half, torch.float32, beta=_BETA_Y_0, alpha=_ALPHA_Y_0
+    )
 
     # ── Steps 1–8 (full coupled update) ──
     for k in range(8):
@@ -124,8 +135,12 @@ def scaled_cans_coupled_ns(
         Z_half = Z.half()
         P_half = torch.baddbmm(Z_half, Z_half, Y_half, beta=0.0, alpha=_ALPHA_P[k])
         Y, Z = (
-            torch.baddbmm(Y, Y_half, P_half, torch.float32, beta=_BETA_Y[k], alpha=_ALPHA_Y[k]),
-            torch.baddbmm(Z, P_half, Z_half, torch.float32, beta=_BETA_Z[k], alpha=_ALPHA_Z[k]),
+            torch.baddbmm(
+                Y, Y_half, P_half, torch.float32, beta=_BETA_Y[k], alpha=_ALPHA_Y[k]
+            ),
+            torch.baddbmm(
+                Z, P_half, Z_half, torch.float32, beta=_BETA_Z[k], alpha=_ALPHA_Z[k]
+            ),
         )
 
     # ── Step 9: Z only, with final 1/(s_{z,10}·√L) fused into coefficients ──
@@ -133,7 +148,9 @@ def scaled_cans_coupled_ns(
     Z_half = Z.half()
     P_half = torch.baddbmm(Z_half, Z_half, Y_half, beta=0.0, alpha=_ALPHA_P[8])
     inv_scale = torch.rsqrt(L).view(B, 1, 1)
-    W = torch.baddbmm(Z, P_half, Z_half, torch.float32, beta=_BETA_Z[8], alpha=_ALPHA_Z[8])
+    W = torch.baddbmm(
+        Z, P_half, Z_half, torch.float32, beta=_BETA_Z[8], alpha=_ALPHA_Z[8]
+    )
     W.mul_(inv_scale)
     W = (W + W.mT) / 2.0
     return W.to(orig_dtype)
