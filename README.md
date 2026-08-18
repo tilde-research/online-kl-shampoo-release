@@ -19,7 +19,7 @@ The implementation combines:
 - **muP shape scaling**, **Nesterov momentum** with variance correction, and **AdamC**
   decoupled weight decay.
 
-In our scaling experiments, OKLS achieves **1.45× Muon's parameter efficiency**
+In our scaling experiments, OKLS achieves **1.59× Muon's parameter efficiency** at the 1.2B Muon-equivalent scale, with the advantage increasing toward larger models,
 while maintaining roughly **98% of its training throughput**.
 
 See the blog for the derivation, system design, and experiments:
